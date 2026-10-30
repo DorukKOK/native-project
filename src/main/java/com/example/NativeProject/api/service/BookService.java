@@ -21,6 +21,8 @@ import java.util.concurrent.ConcurrentHashMap;
 @Transactional(readOnly = true)   // Okuma metotları: oturum açık kalır, LAZY yazara güvenle erişilir
 public class BookService {
     private static final Logger log = LoggerFactory.getLogger(BookService.class);
+    // Her farklı page/size/sort yeni bir anahtar açar; bellek şişmesin diye sınır koyuyoruz
+    private static final int MAX_PAGE_CACHE_SIZE = 100;
 
     private final BookRepository bookRepository;
     private final AuthorRepository authorRepository;
@@ -44,6 +46,9 @@ public class BookService {
         log.info("CACHE MISS: kitap sayfası {}", pageable);
         Page<BookResponse> page = bookRepository.findAll(pageable)
                 .map(this::mapToResponse);
+        if (pageCache.size() >= MAX_PAGE_CACHE_SIZE) {
+            pageCache.clear();          // basit strateji: dolunca hepsini boşalt
+        }
         pageCache.put(pageable, page);
         return page;
     }

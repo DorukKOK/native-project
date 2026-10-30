@@ -3,11 +3,15 @@ package com.example.NativeProject.api.exception;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -61,6 +65,47 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT).body("veri kısıtlaması nedeniyle işlem yapılamadı");
     }
 
+    //Olmayan adres (örn. /yanlis-url) --> 404
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<String> handleNoResource(NoResourceFoundException ex){
+        log.atWarn()
+                .addKeyValue("eventCode","ENDPOINT_NOT_FOUND")
+                .addKeyValue("path",ex.getResourcePath())
+                .log("Endpoint bulunamadı");
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Böyle bir adres yok: /" + ex.getResourcePath());
+    }
+
+    //Yanlış tipte parametre (örn. /books/abc) --> 400
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<String> handleTypeMismatch(MethodArgumentTypeMismatchException ex){
+        log.atWarn()
+                .addKeyValue("eventCode","TYPE_MISMATCH")
+                .addKeyValue("parameter",ex.getName())
+                .addKeyValue("value",ex.getValue())
+                .log("Parametre tipi hatalı");
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Geçersiz değer: " + ex.getName() + "=" + ex.getValue());
+    }
+
+    //Okunamayan / bozuk JSON gövdesi --> 400
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<String> handleNotReadable(HttpMessageNotReadableException ex){
+        log.atWarn()
+                .addKeyValue("eventCode","MALFORMED_REQUEST")
+                .addKeyValue("detail",ex.getMostSpecificCause().getMessage())
+                .log("İstek gövdesi okunamadı");
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("İstek gövdesi okunamadı, JSON'u kontrol edin");
+    }
+
+    //Desteklenmeyen HTTP metodu (örn. POST /books/1) --> 405
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<String> handleMethodNotSupported(HttpRequestMethodNotSupportedException ex){
+        log.atWarn()
+                .addKeyValue("eventCode","METHOD_NOT_ALLOWED")
+                .addKeyValue("method",ex.getMethod())
+                .log("HTTP metodu desteklenmiyor");
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).body("Bu adres " + ex.getMethod() + " metodunu desteklemiyor");
+    }
+
     //Beklenmedik durumlar --> 500
     @ExceptionHandler(Exception.class)
     public ResponseEntity<String> handleAll(Exception ex){
@@ -68,6 +113,7 @@ public class GlobalExceptionHandler {
                 .addKeyValue("eventCode","UNEXPECTED_ERROR")
                 .setCause(ex)
                 .log("Beklenmeyen hata");
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ex.getMessage());
+        // Detay sadece logda kalır, kullanıcıya iç hata mesajı sızdırmıyoruz
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Beklenmeyen bir hata oluştu");
     }
 }

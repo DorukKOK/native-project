@@ -1,24 +1,15 @@
 package com.example.NativeProject.api.controller;
 
-import com.example.NativeProject.api.request.AuthorRequest;
 import com.example.NativeProject.api.request.BookRequest;
-import com.example.NativeProject.api.response.AuthorResponse;
 import com.example.NativeProject.api.response.BookResponse;
 import com.example.NativeProject.api.service.BookService;
 import jakarta.validation.Valid;
-import org.springframework.aot.hint.annotation.RegisterReflectionForBinding;
-import org.springframework.context.annotation.Configuration;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PagedModel;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@Configuration
-@RegisterReflectionForBinding({
-        AuthorRequest.class, AuthorResponse.class,
-        BookRequest.class, BookResponse.class
-})
 @RequestMapping("/books")
 public class BookController {
     private final BookService bookService;
