@@ -53,6 +53,15 @@ public class GlobalExceptionHandler {
                 .log("Yazar silinemedi, kitapları var");
         return ResponseEntity.status(HttpStatus.CONFLICT).body(ex.getMessage());
     }
+    // Stok yetersizse (azaltma isteği mevcut stoktan büyükse)--> 409
+    @ExceptionHandler(InsufficientStockException.class)
+    public ResponseEntity<String> HandleInsufficientStockException(InsufficientStockException ex){
+        log.atWarn()
+                .addKeyValue("eventCode","INSUFFICIENT_STOCK")
+                .addKeyValue("bookId",ex.getBookId())
+                .log("Yetersiz stok");
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ex.getMessage());
+    }
 
     //Veritabanı kısıtlama ihlali --> 409
     @ExceptionHandler(DataIntegrityViolationException.class)
