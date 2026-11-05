@@ -68,6 +68,69 @@ class AuthorBookApiTests {
     }
 
     @Test
+    void bookResponsesShowCurrentStock() throws Exception {
+        String authorJson = mockMvc.perform(post("/authors")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Stok Yazarı\",\"birthYear\":1980}"))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        Integer authorId = JsonPath.read(authorJson, "$.id");
+
+        // Yeni kitap: stok kaydı otomatik açılır, başlangıç 0
+        String bookJson = mockMvc.perform(post("/authors/{id}/books", authorId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Stoklu Kitap\",\"pageCount\":100,\"price\":50.00}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.quantity").value(0))
+                .andReturn().getResponse().getContentAsString();
+        Integer bookId = JsonPath.read(bookJson, "$.id");
+
+        // Cache'i ısıt: tek kitap ve liste
+        mockMvc.perform(get("/books/{id}", bookId))
+                .andExpect(jsonPath("$.quantity").value(0));
+        mockMvc.perform(get("/authors/{id}/books", authorId))
+                .andExpect(jsonPath("$.content[0].quantity").value(0));
+
+        // Stok artınca cache'lenmiş cevaplarda da yeni değer görünmeli
+        mockMvc.perform(post("/books/{id}/stock/increase", bookId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\":10}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/books/{id}", bookId))
+                .andExpect(jsonPath("$.quantity").value(10));
+        mockMvc.perform(get("/books").param("size", "100"))
+                .andExpect(jsonPath("$.content[?(@.id==" + bookId + ")].quantity").value(10));
+
+        // Stok azalınca da güncel değer dönmeli
+        mockMvc.perform(post("/books/{id}/stock/decrease", bookId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\":3}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/books/{id}", bookId))
+                .andExpect(jsonPath("$.quantity").value(7));
+        mockMvc.perform(get("/authors/{id}/books", authorId))
+                .andExpect(jsonPath("$.content[0].quantity").value(7));
+
+        // Stoktan fazlası azaltılamaz: 409, stok değişmez
+        mockMvc.perform(post("/books/{id}/stock/decrease", bookId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\":999}"))
+                .andExpect(status().isConflict());
+        mockMvc.perform(get("/books/{id}", bookId))
+                .andExpect(jsonPath("$.quantity").value(7));
+
+        // Olmayan kitabın stoğu azaltılırsa 404 (409 değil)
+        mockMvc.perform(post("/books/{id}/stock/decrease", 999999)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\":1}"))
+                .andExpect(status().isNotFound());
+
+        // Temizlik
+        mockMvc.perform(delete("/books/{id}", bookId)).andExpect(status().isNoContent());
+        mockMvc.perform(delete("/authors/{id}", authorId)).andExpect(status().isNoContent());
+    }
+
+    @Test
     void invalidRequestsReturnClientErrors() throws Exception {
         mockMvc.perform(post("/authors").contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"\"}"))
                 .andExpect(status().isBadRequest())

@@ -1,5 +1,6 @@
 package com.example.NativeProject.api.service;
 
+import com.example.NativeProject.api.exception.InsufficientStockException;
 import com.example.NativeProject.api.model.StockEntity;
 import com.example.NativeProject.api.repository.StockRepository;
 import com.example.NativeProject.api.request.StockChangeRequest;
@@ -44,7 +45,11 @@ public class StockService {
     public StockResponse decreaseStock(Long bookId, @Valid StockChangeRequest request){
         int updated = stockRepository.decrease(bookId, request.getAmount());
         if (updated == 0){
-            throw new NoSuchElementException("Bu kitabın stogu daha fazla azaltılamaz: "+bookId);
+            // Güncelleme etkisizse iki sebep olabilir: kayıt yok (404) ya da stok yetersiz (409)
+            if (!stockRepository.existsByBookEntityId(bookId)) {
+                throw new NoSuchElementException("Bu kitabın stok kaydı yok: " + bookId);
+            }
+            throw new InsufficientStockException(bookId);
         }
         return getStockByBookId(bookId);
     }

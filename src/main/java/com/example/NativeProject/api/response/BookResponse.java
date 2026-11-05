@@ -14,4 +14,18 @@ public class BookResponse {
     private BigDecimal price;
     private Long authorId;
     private String authorName;
+    private Integer quantity;
+
+    // Cache'teki nesneye dokunmadan, güncel stok yazılmış bir kopya üretir
+    public BookResponse copyWithQuantity(Integer quantity) {
+        BookResponse copy = new BookResponse();
+        copy.setId(id);
+        copy.setTitle(title);
+        copy.setPageCount(pageCount);
+        copy.setPrice(price);
+        copy.setAuthorId(authorId);
+        copy.setAuthorName(authorName);
+        copy.setQuantity(quantity);
+        return copy;
+    }
 }

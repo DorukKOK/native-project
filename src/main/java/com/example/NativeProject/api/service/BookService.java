@@ -2,17 +2,22 @@ package com.example.NativeProject.api.service;
 
 import com.example.NativeProject.api.model.AuthorEntity;
 import com.example.NativeProject.api.model.BookEntity;
+import com.example.NativeProject.api.model.StockEntity;
 import com.example.NativeProject.api.repository.AuthorRepository;
 import com.example.NativeProject.api.repository.BookRepository;
+import com.example.NativeProject.api.repository.StockRepository;
 import com.example.NativeProject.api.request.BookRequest;
 import com.example.NativeProject.api.response.BookResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.concurrent.ConcurrentHashMap;
@@ -26,22 +31,25 @@ public class BookService {
 
     private final BookRepository bookRepository;
     private final AuthorRepository authorRepository;
+    private final StockRepository stockRepository;
 
     // Cache 1: kitap id -> kitap (DTO tutuyoruz, entity değil: LAZY sorunu çıkmasın)
     private final Map<Long, BookResponse> bookCache = new ConcurrentHashMap<>();
     // Cache 2: sayfa isteği (page, size, sort) -> o sayfanın sonucu
     private final Map<Pageable, Page<BookResponse>> pageCache = new ConcurrentHashMap<>();
 
-    public BookService(BookRepository bookRepository, AuthorRepository authorRepository) {
+    public BookService(BookRepository bookRepository, AuthorRepository authorRepository,
+                       StockRepository stockRepository) {
         this.bookRepository = bookRepository;
         this.authorRepository = authorRepository;
+        this.stockRepository = stockRepository;
     }
 
     public Page<BookResponse> getAllBooks(Pageable pageable) {
         Page<BookResponse> cached = pageCache.get(pageable);
         if (cached != null) {
             log.info("CACHE HIT: kitap sayfası {}", pageable);
-            return cached;
+            return withStock(cached);
         }
         log.info("CACHE MISS: kitap sayfası {}", pageable);
         Page<BookResponse> page = bookRepository.findAll(pageable)
@@ -50,21 +58,21 @@ public class BookService {
             pageCache.clear();          // basit strateji: dolunca hepsini boşalt
         }
         pageCache.put(pageable, page);
-        return page;
+        return withStock(page);
     }
 
     public BookResponse getBookById(Long id) {
         BookResponse cached = bookCache.get(id);
         if (cached != null) {
             log.info("CACHE HIT: kitap id={}", id);
-            return cached;
+            return withStock(cached);
         }
         log.info("CACHE MISS: kitap id={}", id);
         BookEntity book = bookRepository.findById(id)
                 .orElseThrow(() -> new NoSuchElementException("Böyle bir kitap yok: " + id));
         BookResponse response = mapToResponse(book);
         bookCache.put(id, response);
-        return response;
+        return withStock(response);
     }
 
     // Bir yazarın kitapları (sayfalı). Bu liste cache'lenmiyor: anahtar yazar id + sayfa bilgisi olurdu.
@@ -72,8 +80,8 @@ public class BookService {
         if (authorRepository.findById(authorId).isEmpty()) {
             throw new NoSuchElementException("Böyle bir yazar yok: " + authorId);
         }
-        return bookRepository.findByAuthorEntityId(authorId, pageable)
-                .map(this::mapToResponse);
+        return withStock(bookRepository.findByAuthorEntityId(authorId, pageable)
+                .map(this::mapToResponse));
     }
 
     // AuthorService yazar adı değişince çağırır: cache'teki kitaplarda eski authorName kalmasın
@@ -94,8 +102,14 @@ public class BookService {
         book.setAuthorEntity(author);   // kitabı yazarına bağlıyoruz
 
         BookEntity saved = bookRepository.save(book);
+
+        StockEntity stock = new StockEntity();   // her kitabın stok kaydı olsun: başlangıç 0
+        stock.setBookEntity(saved);
+        stock.setQuantity(0);
+        stockRepository.save(stock);
+
         pageCache.clear();              // sayfalar eskidi: yeni kitap içlerinde yok
-        return mapToResponse(saved);
+        return withStock(mapToResponse(saved));
     }
 
     @Transactional
@@ -109,7 +123,7 @@ public class BookService {
         BookEntity saved = bookRepository.save(existingBook);
         bookCache.remove(id);
         pageCache.clear();
-        return mapToResponse(saved);
+        return withStock(mapToResponse(saved));
     }
 
     @Transactional
@@ -120,6 +134,24 @@ public class BookService {
         bookRepository.deleteById(id);
         bookCache.remove(id);
         pageCache.clear();
+    }
+
+    // Cache'teki nesneler stoksuz tutulur; stok her cevapta tek sorguyla okunup KOPYAYA yazılır.
+    // Stok kaydı olmayan kitap için 0 döner.
+    private Page<BookResponse> withStock(Page<BookResponse> page) {
+        if (page.isEmpty()) {
+            return page;
+        }
+        Map<Long, Integer> quantities = new HashMap<>();
+        for (Object[] row : stockRepository.findQuantitiesByBookIds(
+                page.getContent().stream().map(BookResponse::getId).toList())) {
+            quantities.put((Long) row[0], (Integer) row[1]);
+        }
+        return page.map(book -> book.copyWithQuantity(quantities.getOrDefault(book.getId(), 0)));
+    }
+
+    private BookResponse withStock(BookResponse book) {
+        return withStock(new PageImpl<>(List.of(book))).getContent().get(0);
     }
 
     private BookResponse mapToResponse(BookEntity entity) {
