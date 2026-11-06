@@ -1,6 +1,18 @@
 # native-project
 
-Yazar (`authors`) → Kitap (`books`) parent-child ilişkili, sayfalı CRUD REST API.
+Mikroservis yapısında iki bağımsız servis içeren depo:
+
+| Servis | Klasör | Port | Veritabanı | Açıklama |
+|---|---|---|---|---|
+| product-service | `product-service/` | 8080 | `mydatabase` | Yazar, kitap ve stok REST API (aşağıdaki endpoint'ler) |
+| order-service | `order-service/` | 8081 | `order_db` | Sipariş servisi (şimdilik iskelet, bkz. `order-service/README.md`) |
+
+Her servis ayrı derlenir, ayrı çalışır ve kendi veritabanına sahiptir. Kökteki `compose.yaml` ortak Postgres container'ını açar.
+Aşağıdaki komutlar `product-service` içindir; order-service için `:order-service:` önekini kullanın.
+
+## product-service
+
+Yazar (`authors`) → Kitap (`books`) parent-child ilişkili, sayfalı CRUD REST API; kitabın stoğu `books.stock_quantity` sütunundadır.
 Spring Boot 4 + Java 25 ile yazıldı, **GraalVM native image** olarak derlenebilir.
 
 ## Gereksinimler
@@ -30,28 +42,28 @@ Varsayılan sayfa boyutu 10, en fazla 50. Swagger UI: `http://localhost:8080/swa
 
 JVM ile (Postgres'i `compose.yaml` üzerinden otomatik başlatır):
 ```bash
-./gradlew bootRun
+./gradlew :product-service:bootRun
 ```
 
 Testler:
 ```bash
-./gradlew test
+./gradlew :product-service:test
 ```
 
 ## Native image
 
 Doğrudan native binary:
 ```bash
-./gradlew nativeCompile
+./gradlew :product-service:nativeCompile
 docker compose up -d postgres
 SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5433/mydatabase \
 SPRING_DATASOURCE_USERNAME=myuser SPRING_DATASOURCE_PASSWORD=secret \
-./build/native/nativeCompile/native-project
+./product-service/build/native/nativeCompile/product-service
 ```
 
 Ya da native container image olarak (GraalVM kurulu olmasına gerek yok):
 ```bash
-./gradlew bootBuildImage
+./gradlew :product-service:bootBuildImage
 docker compose --profile native up
 ```
 

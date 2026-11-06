@@ -16,7 +16,7 @@ services:
       retries: 10
 
   app:
-    image: 'native-project:0.0.1-SNAPSHOT'
+    image: 'product-service:0.0.1-SNAPSHOT'
     profiles: ["native"]
     ports:
       - '8080:8080'
