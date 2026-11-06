@@ -2,10 +2,12 @@ package com.example.orderservice.api.exception;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.core.PropertyReferenceException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -103,6 +105,26 @@ public class GlobalExceptionHandler {
                 .addKeyValue("method",ex.getMethod())
                 .log("HTTP metodu desteklenmiyor");
         return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).body("Bu adres " + ex.getMethod() + " metodunu desteklemiyor");
+    }
+
+    //Desteklenmeyen içerik tipi (örn. Content-Type: text/plain) --> 415
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<String> handleMediaTypeNotSupported(HttpMediaTypeNotSupportedException ex){
+        log.atWarn()
+                .addKeyValue("eventCode","UNSUPPORTED_MEDIA_TYPE")
+                .addKeyValue("contentType",ex.getContentType())
+                .log("İçerik tipi desteklenmiyor");
+        return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE).body("Bu adres yalnızca application/json kabul eder");
+    }
+
+    //Olmayan alana göre sıralama (örn. ?sort=yok,asc) --> 400
+    @ExceptionHandler(PropertyReferenceException.class)
+    public ResponseEntity<String> handleInvalidSortProperty(PropertyReferenceException ex){
+        log.atWarn()
+                .addKeyValue("eventCode","INVALID_SORT_PROPERTY")
+                .addKeyValue("property",ex.getPropertyName())
+                .log("Geçersiz sıralama alanı");
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Geçersiz sıralama alanı: " + ex.getPropertyName());
     }
 
     //Beklenmedik durumlar --> 500
