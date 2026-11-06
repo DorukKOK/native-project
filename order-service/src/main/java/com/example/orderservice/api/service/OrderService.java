@@ -18,20 +18,11 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import java.util.NoSuchElementException;
-import java.util.Set;
 
 @Service
 @Transactional(readOnly = true)   // Okuma metotları: oturum açık kalır, LAZY kalemlere güvenle erişilir
 public class OrderService {
-    // Hangi durumdan hangisine geçilebilir. CANCELLED son durumdur.
-    private static final Map<OrderStatus, Set<OrderStatus>> ALLOWED_TRANSITIONS = Map.of(
-            OrderStatus.PENDING, Set.of(OrderStatus.CONFIRMED, OrderStatus.CANCELLED),
-            OrderStatus.CONFIRMED, Set.of(OrderStatus.CANCELLED),
-            OrderStatus.CANCELLED, Set.of()
-    );
-
     private final OrderRepository orderRepository;
 
     public OrderService(OrderRepository orderRepository) {
@@ -40,9 +31,12 @@ public class OrderService {
 
     // status verilirse sadece o durumdaki siparişler gelir
     public Page<OrderResponse> getAllOrders(OrderStatus status, Pageable pageable) {
-        Page<OrderEntity> page = (status == null)
-                ? orderRepository.findAll(pageable)
-                : orderRepository.findByStatus(status, pageable);
+        Page<OrderEntity> page;
+        if (status == null) {
+            page = orderRepository.findAll(pageable);
+        } else {
+            page = orderRepository.findByStatus(status, pageable);
+        }
         return page.map(this::mapToResponse);
     }
 
@@ -78,7 +72,7 @@ public class OrderService {
     @Transactional
     public OrderResponse changeStatus(Long id, OrderStatus newStatus) {
         OrderEntity order = findOrder(id);
-        if (!ALLOWED_TRANSITIONS.get(order.getStatus()).contains(newStatus)) {
+        if (!isTransitionAllowed(order.getStatus(), newStatus)) {
             throw new InvalidOrderStateException(id,
                     "Sipariş " + order.getStatus() + " durumundan " + newStatus + " durumuna geçirilemez.");
         }
@@ -94,6 +88,17 @@ public class OrderService {
             throw new InvalidOrderStateException(id, "Onaylanmış sipariş silinemez, önce iptal edin.");
         }
         orderRepository.delete(order);
+    }
+
+    // Hangi durumdan hangisine geçilebilir. CANCELLED son durumdur.
+    private boolean isTransitionAllowed(OrderStatus from, OrderStatus to) {
+        if (from == OrderStatus.PENDING) {
+            return to == OrderStatus.CONFIRMED || to == OrderStatus.CANCELLED;
+        } else if (from == OrderStatus.CONFIRMED) {
+            return to == OrderStatus.CANCELLED;
+        } else {
+            return false;
+        }
     }
 
     private OrderEntity findOrder(Long id) {
