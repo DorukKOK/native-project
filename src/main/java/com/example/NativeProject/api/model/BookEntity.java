@@ -18,6 +18,12 @@ public class BookEntity {
     private Integer pageCount;
     private BigDecimal price;
 
+    // updatable = false: kitap bilgisi (başlık/fiyat) güncellenirken stok sütunu UPDATE'e girmez,
+    // yoksa eşzamanlı bir stok değişikliği eski değerle ezilebilir. Stok yalnızca BookRepository'deki
+    // atomik sorgularla değişir.
+    @Column(name = "stock_quantity", nullable = false, updatable = false)
+    private Integer stockQuantity = 0;
+
     @ManyToOne(fetch = FetchType.LAZY) //gerçekten ihtiyacın olana kadar veriyi getirme
 
     @JoinColumn(name = "author_id")
