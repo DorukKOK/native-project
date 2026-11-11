@@ -1,4 +1,6 @@
 package com.example.NativeProject.api.model;
 
-public enum StockOperationTyle {
+public enum StockOperationType {
+    INCREASE,
+    DECREASE
 }

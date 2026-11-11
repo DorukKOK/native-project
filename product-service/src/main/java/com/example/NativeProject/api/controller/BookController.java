@@ -51,12 +51,12 @@ public class BookController {
         return stockService.getStockByBookId(bookId);
     }
     @PostMapping("/{bookId}/stock/increase")
-    public ResponseEntity<StockResponse> increaseStock(@PathVariable Long bookId,
+    public ResponseEntity<StockResponse> increaseStock(@RequestHeader("Idempotency-Key") String idempotencyKey,@PathVariable Long bookId,
                                                        @Valid @RequestBody StockChangeRequest request){
         return ResponseEntity.status(HttpStatus.OK).body(stockService.increaseStock(bookId,request));
     }
     @PostMapping("/{bookId}/stock/decrease")
-    public ResponseEntity<StockResponse> decreaseStock(@PathVariable Long bookId,
+    public ResponseEntity<StockResponse> decreaseStock(@RequestHeader("Idempotency-Key") String idempotencyKey,@PathVariable Long bookId,
                                                        @Valid @RequestBody StockChangeRequest request){
         return ResponseEntity.status(HttpStatus.OK).body(stockService.decreaseStock(bookId,request));
     }
