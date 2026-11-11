@@ -12,6 +12,8 @@ import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.client.HttpServerErrorException;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -56,6 +58,15 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(ex.getMessage());
     }
 
+    //Stok yetersiz --> 409
+    @ExceptionHandler(InsufficientStockException.class)
+    public ResponseEntity<String> handleInsufficientStock(InsufficientStockException ex){
+        log.atWarn()
+                .addKeyValue("eventCode","INSUFFICIENT_STOCK")
+                .addKeyValue("bookId",ex.getBookId())
+                .log("Stok yetersiz");
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ex.getMessage());
+    }
     //Veritabanı kısıtlama ihlali --> 409
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<String> handleDataIntegrity(DataIntegrityViolationException ex){
@@ -125,6 +136,16 @@ public class GlobalExceptionHandler {
                 .addKeyValue("property",ex.getPropertyName())
                 .log("Geçersiz sıralama alanı");
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Geçersiz sıralama alanı: " + ex.getPropertyName());
+    }
+
+    //product-service'e ulaşılamadı (kapalı / timeout) ya da 5xx döndü --> 503
+    @ExceptionHandler({ResourceAccessException.class, HttpServerErrorException.class})
+    public ResponseEntity<String> handleProductServiceUnavailable(Exception ex){
+        log.atError()
+                .addKeyValue("eventCode","PRODUCT_SERVICE_UNAVAILABLE")
+                .addKeyValue("detail",ex.getMessage())
+                .log("product-service'e ulaşılamadı");
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body("Ürün servisine şu an ulaşılamıyor, lütfen daha sonra tekrar deneyin");
     }
 
     //Beklenmedik durumlar --> 500

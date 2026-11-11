@@ -1,6 +1,6 @@
 # order-service
 
-Mikroservis yapısındaki sipariş servisi. Şu an siparişlerin temel CRUD'u var; product-service ile haberleşme (fiyatı ve stoğu oradan alma, stok düşme) henüz yazılmadı.
+Mikroservis yapısındaki sipariş servisi. Siparişlerin temel CRUD’u var; fiyat product-service’ten alınır. Stok da product-service üzerinden yönetilir (aşağıda “Stok davranışı”).
 
 ## Endpoint'ler
 
@@ -15,10 +15,22 @@ Mikroservis yapısındaki sipariş servisi. Şu an siparişlerin temel CRUD'u va
 
 Sipariş gövdesi:
 ```json
-{"customerName":"Ayse Yilmaz","items":[{"bookId":1,"quantity":2,"unitPrice":50.00}]}
+{"customerName":"Ayse Yilmaz","items":[{"bookId":1,"quantity":2}]}
 ```
 `bookId`, product-service'teki kitabın id'sidir (`order_items.book_id`, veritabanı düzeyinde bağ yoktur).
-`unitPrice` şimdilik istekten gelir; haberleşme yazılınca product-service'ten alınacak.
+`unitPrice` istekte gönderilmez: sipariş oluşturulurken/güncellenirken product-service’ten (`GET /books/{id}`) alınır ve o anki haliyle kalemin üstüne yazılır. product-service kapalıysa 503, kitap yoksa 404 döner.
+
+### Stok davranışı
+Stok product-service üzerinden (`POST /books/{id}/stock/decrease|increase`) yönetilir:
+
+| İşlem | Stok |
+|---|---|
+| `POST /orders` | Kalemlerin adedi düşer (rezerve edilir). Yetersizse **409**, hiçbir stok düşmez |
+| `PUT /orders/{id}` | Sadece fark kadar: yeni adet − eski adet (artan düşer, azalan iade edilir) |
+| `PUT /orders/{id}/status` → `CANCELLED` | Siparişin stoğu geri verilir |
+| `DELETE /orders/{id}` (`PENDING`) | Stok geri verilir |
+
+İki servis arasında tek transaction yoktur: bir adım patlarsa o ana kadar yapılan stok hareketleri geri alınır (telafi). Telafi de başarısız olursa `STOCK_COMPENSATION_FAILED` loglanır, stok elle düzeltilmelidir.
 
 ### Durum geçişleri
 `PENDING → CONFIRMED`, `PENDING → CANCELLED`, `CONFIRMED → CANCELLED`. `CANCELLED` son durumdur. Geçersiz geçiş 409 döner.

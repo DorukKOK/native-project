@@ -63,8 +63,8 @@ SPRING_DATASOURCE_USERNAME=myuser SPRING_DATASOURCE_PASSWORD=secret \
 
 Ya da native container image olarak (GraalVM kurulu olmasına gerek yok):
 ```bash
-./gradlew :product-service:bootBuildImage
-docker compose --profile native up
+./gradlew :product-service:bootBuildImage :order-service:bootBuildImage
+docker compose --profile native up   # product-service (8080) + order-service (8081) birlikte
 ```
 
 ### Native için neler yapıldı?

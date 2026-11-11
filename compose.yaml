@@ -9,6 +9,7 @@ services:
       - '5433:5432'
     volumes:
       - postgres_data:/var/lib/postgresql
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U myuser -d mydatabase"]
       interval: 3s
@@ -24,6 +25,20 @@ services:
       - 'SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/mydatabase'
       - 'SPRING_DATASOURCE_USERNAME=myuser'
       - 'SPRING_DATASOURCE_PASSWORD=secret'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  order-app:
+    image: 'order-service:0.0.1-SNAPSHOT'
+    profiles: ["native"]
+    ports:
+      - '8081:8081'
+    environment:
+      - 'DB_URL=jdbc:postgresql://postgres:5432/order_db'
+      - 'DB_USERNAME=myuser'
+      - 'DB_PASSWORD=secret'
+      - 'PRODUCT_SERVICE_URL=http://app:8080'
     depends_on:
       postgres:
         condition: service_healthy
