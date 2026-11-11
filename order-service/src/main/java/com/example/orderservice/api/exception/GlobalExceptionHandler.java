@@ -10,6 +10,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.client.HttpServerErrorException;
@@ -67,6 +68,16 @@ public class GlobalExceptionHandler {
                 .log("Stok yetersiz");
         return ResponseEntity.status(HttpStatus.CONFLICT).body(ex.getMessage());
     }
+    //Zorunlu header eksik (örn. Idempotency-Key gönderilmedi) --> 400
+    @ExceptionHandler(MissingRequestHeaderException.class)
+    public ResponseEntity<String> handleMissingHeader(MissingRequestHeaderException ex){
+        log.atWarn()
+                .addKeyValue("eventCode","MISSING_HEADER")
+                .addKeyValue("header",ex.getHeaderName())
+                .log("Zorunlu header eksik");
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Zorunlu header eksik: " + ex.getHeaderName());
+    }
+
     //Veritabanı kısıtlama ihlali --> 409
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<String> handleDataIntegrity(DataIntegrityViolationException ex){

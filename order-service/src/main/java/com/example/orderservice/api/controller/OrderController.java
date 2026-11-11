@@ -34,8 +34,9 @@ public class OrderController {
     }
 
     @PostMapping
-    public ResponseEntity<OrderResponse> createOrder(@Valid @RequestBody OrderRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(orderService.createOrder(request));
+    public ResponseEntity<OrderResponse> createOrder(
+            @RequestHeader("Idempotency-Key") String idempotencyKey,@Valid @RequestBody OrderRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(orderService.createOrder(idempotencyKey,request));
     }
 
     // Sadece bekleyen (PENDING) sipariş güncellenebilir

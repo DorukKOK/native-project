@@ -31,11 +31,14 @@ public class OrderEntity {
 
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
+    @Column(name = "idempotency_key")
+    private String idempotencyKey;
 
     // @BatchSize: sayfadaki siparişlerin kalemleri tek sorguda gelir, sipariş başına ayrı sorgu atılmaz (N+1 yok)
     @OneToMany(mappedBy = "orderEntity", cascade = CascadeType.ALL, orphanRemoval = true)
     @BatchSize(size = 50)
     private List<OrderItemEntity> items = new ArrayList<>();
+
 
     // İki yönlü ilişkiyi tek yerden kuruyoruz: kalemi listeye ekler ve kalemin siparişini ayarlar
     public void addItem(OrderItemEntity item) {

@@ -51,7 +51,11 @@ public class OrderService {
     }
 
     @Transactional
-    public OrderResponse createOrder(OrderRequest request) {
+    public OrderResponse createOrder(String idempotencyKey,OrderRequest request) {
+        Optional<OrderEntity> existing = orderRepository.findByIdempotencyKey(idempotencyKey);
+        if (existing.isPresent()){ //bu anahtarla daha önce oluşmuş bir sipariş var mı
+            return mapToResponse((OrderEntity) existing.get());
+        }
         OrderEntity order = new OrderEntity();
         order.setCustomerName(request.getCustomerName());
         order.setStatus(OrderStatus.PENDING);   // her sipariş beklemede başlar
@@ -60,6 +64,7 @@ public class OrderService {
 
         // Stok sipariş anında düşer (rezerve edilir); kayıt patlarsa stok geri verilir
         Map<Long, Integer> stockChange = stockQuantities(order.getItems());
+        order.setIdempotencyKey(idempotencyKey);
         return mapToResponse(changeStockThenSave(stockChange, () -> orderRepository.saveAndFlush(order)));
     }
 
