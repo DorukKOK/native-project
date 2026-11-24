@@ -37,4 +37,4 @@ out/
 .vscode/
 
 ### Test sınıfları repoya girmesin (yerelde kalır) ###
-**/src/test/java/com/example/NativeProject/
+product-service/src/test/java/com/example/
