@@ -16,19 +16,32 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.*;
-import java.util.function.Supplier;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Slf4j
 @Service
 @Transactional(readOnly = true)   // Okuma metotları: oturum açık kalır, LAZY kalemlere güvenle erişilir
 public class OrderService {
+    // Her farklı status/page/size/sort yeni bir anahtar açar; bellek şişmesin diye sınır koyuyoruz
+    private static final int MAX_PAGE_CACHE_SIZE = 100;
+
     private final OrderRepository orderRepository;
     private final ProductClient productClient;
+
+    // Cache 1: sipariş id -> sipariş (DTO tutuyoruz, entity değil: LAZY sorunu çıkmasın)
+    private final Map<Long, OrderResponse> orderCache = new ConcurrentHashMap<>();
+    // Cache 2: sayfa isteği (status filtresi + page/size/sort) -> o sayfanın sonucu
+    private final Map<PageKey, Page<OrderResponse>> pageCache = new ConcurrentHashMap<>();
+
+    private record PageKey(OrderStatus status, Pageable pageable) {
+    }
 
     public OrderService(OrderRepository orderRepository, ProductClient productClient) {
         this.orderRepository = orderRepository;
@@ -37,35 +50,59 @@ public class OrderService {
 
     // status verilirse sadece o durumdaki siparişler gelir
     public Page<OrderResponse> getAllOrders(OrderStatus status, Pageable pageable) {
+        PageKey key = new PageKey(status, pageable);
+        Page<OrderResponse> cached = pageCache.get(key);
+        if (cached != null) {
+            log.info("CACHE HIT: sipariş sayfası {}", key);
+            return cached;
+        }
+        log.info("CACHE MISS: sipariş sayfası {}", key);
         Page<OrderEntity> page;
         if (status == null) {
             page = orderRepository.findAll(pageable);
         } else {
             page = orderRepository.findByStatus(status, pageable);
         }
-        return page.map(this::mapToResponse);
+        Page<OrderResponse> response = page.map(this::mapToResponse);
+        if (pageCache.size() >= MAX_PAGE_CACHE_SIZE) {
+            pageCache.clear();          // basit strateji: dolunca hepsini boşalt
+        }
+        pageCache.put(key, response);
+        return response;
     }
 
     public OrderResponse getOrderById(Long id) {
-        return mapToResponse(findOrder(id));
+        OrderResponse cached = orderCache.get(id);
+        if (cached != null) {
+            log.info("CACHE HIT: sipariş id={}", id);
+            return cached;
+        }
+        log.info("CACHE MISS: sipariş id={}", id);
+        OrderResponse response = mapToResponse(findOrder(id));
+        orderCache.put(id, response);
+        return response;
     }
 
     @Transactional
-    public OrderResponse createOrder(String idempotencyKey,OrderRequest request) {
+    public OrderResponse createOrder(String idempotencyKey, OrderRequest request) {
         Optional<OrderEntity> existing = orderRepository.findByIdempotencyKey(idempotencyKey);
-        if (existing.isPresent()){ //bu anahtarla daha önce oluşmuş bir sipariş var mı
-            return mapToResponse((OrderEntity) existing.get());
+        if (existing.isPresent()) { // bu anahtarla daha önce oluşmuş bir sipariş var mı
+            return mapToResponse(existing.get());
         }
         OrderEntity order = new OrderEntity();
         order.setCustomerName(request.getCustomerName());
         order.setStatus(OrderStatus.PENDING);   // her sipariş beklemede başlar
         order.setCreatedAt(Instant.now());
+        order.setIdempotencyKey(idempotencyKey);
         applyItems(order, request.getItems());
 
-        // Stok sipariş anında düşer (rezerve edilir); kayıt patlarsa stok geri verilir
-        Map<Long, Integer> stockChange = stockQuantities(order.getItems());
-        order.setIdempotencyKey(idempotencyKey);
-        return mapToResponse(changeStockThenSave(stockChange, () -> orderRepository.saveAndFlush(order)));
+        // Stok sipariş anında düşer (rezerve edilir). Transaction rollback olursa stok otomatik geri verilir.
+        applyStockChange(stockQuantities(order.getItems()));
+
+        // saveAndFlush: kısıt ihlali (örn. aynı Idempotency-Key) commit'te değil burada patlasın, 409'a çevrilsin
+        OrderEntity saved = orderRepository.saveAndFlush(order);
+        pageCache.clear();              // sayfalar eskidi: yeni sipariş içlerinde yok
+        return mapToResponse(saved);
     }
 
     @Transactional
@@ -81,8 +118,12 @@ public class OrderService {
         applyItems(order, request.getItems());
 
         // Sadece fark kadar stok hareketi: (yeni adet - eski adet). Pozitif düşer, negatif iade edilir.
-        Map<Long, Integer> stockChange = stockDifference(stockQuantities(order.getItems()), oldQuantities);
-        return mapToResponse(changeStockThenSave(stockChange, () -> orderRepository.saveAndFlush(order)));
+        applyStockChange(stockDifference(stockQuantities(order.getItems()), oldQuantities));
+
+        OrderEntity saved = orderRepository.saveAndFlush(order);
+        orderCache.remove(id);
+        pageCache.clear();
+        return mapToResponse(saved);
     }
 
     @Transactional
@@ -96,10 +137,13 @@ public class OrderService {
 
         if (newStatus == OrderStatus.CANCELLED) {
             // İptal: sipariş anında düşen stok geri verilir (negatif = iade)
-            Map<Long, Integer> stockChange = negate(stockQuantities(order.getItems()));
-            return mapToResponse(changeStockThenSave(stockChange, () -> orderRepository.saveAndFlush(order)));
+            applyStockChange(negate(stockQuantities(order.getItems())));
         }
-        return mapToResponse(orderRepository.save(order));
+
+        OrderEntity saved = orderRepository.saveAndFlush(order);
+        orderCache.remove(id);
+        pageCache.clear();
+        return mapToResponse(saved);
     }
 
     @Transactional
@@ -111,15 +155,13 @@ public class OrderService {
         }
         // Bekleyen sipariş silinirse rezerve stok geri verilir. İptal edilmişin stoğu iptalde zaten iade edildi.
         if (order.getStatus() == OrderStatus.PENDING) {
-            Map<Long, Integer> stockChange = negate(stockQuantities(order.getItems()));
-            changeStockThenSave(stockChange, () -> {
-                orderRepository.delete(order);
-                orderRepository.flush();
-                return null;
-            });
-        } else {
-            orderRepository.delete(order);
+            applyStockChange(negate(stockQuantities(order.getItems())));
         }
+
+        orderRepository.delete(order);
+        orderRepository.flush();
+        orderCache.remove(id);
+        pageCache.clear();
     }
 
     // Hangi durumdan hangisine geçilebilir. CANCELLED son durumdur.
@@ -155,8 +197,10 @@ public class OrderService {
         order.setTotalAmount(total.setScale(2, RoundingMode.HALF_UP));
     }
 
-    // ---- Stok yönetimi (product-service ile) ----
     // Stok haritası: kitap id -> değişim. Pozitif = stoktan düş, negatif = stoğa iade et.
+    // Stok başka bir serviste/veritabanında olduğu için @Transactional onu kendiliğinden geri alamaz.
+    // Bu yüzden yapılan stok hareketleri transaction'a kaydedilir; transaction rollback olursa
+    // (metot içinde exception, commit hatası...) Spring revertStockChange'i çağırır.
 
     // Kalemlerin kitap başına toplam adedi (aynı kitap iki kalemde gelirse toplanır)
     private Map<Long, Integer> stockQuantities(List<OrderItemEntity> items) {
@@ -181,19 +225,12 @@ public class OrderService {
         return result;
     }
 
-    // Önce stoğu değiştirir, sonra veritabanı yazımını yapar. Yazım patlarsa stok değişimi geri alınır.
-    private <T> T changeStockThenSave(Map<Long, Integer> stockChange, Supplier<T> databaseWrite) {
-        Map<Long, Integer> applied = applyStockChange(stockChange);
-        try {
-            return databaseWrite.get();
-        } catch (RuntimeException e) {
-            revertStockChange(applied);
-            throw e;
+    // Kitapları sırayla işler. Biri patlarsa (stok yetersiz, servis kapalı...) o ana kadar yapılanları hemen geri alıp
+    // hatayı fırlatır. Hepsi başarılıysa, transaction rollback olursa geri alınmak üzere transaction'a kaydeder.
+    private void applyStockChange(Map<Long, Integer> stockChange) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            throw new IllegalStateException("Stok değişimi aktif bir transaction içinde yapılmalı");
         }
-    }
-
-    // Kitapları sırayla işler. Biri patlarsa (stok yetersiz, servis kapalı...) o ana kadar yapılanları geri alıp hatayı fırlatır.
-    private Map<Long, Integer> applyStockChange(Map<Long, Integer> stockChange) {
         Map<Long, Integer> applied = new LinkedHashMap<>();
         try {
             for (Map.Entry<Long, Integer> entry : stockChange.entrySet()) {
@@ -208,7 +245,15 @@ public class OrderService {
             revertStockChange(applied);
             throw e;
         }
-        return applied;
+
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                if (status == STATUS_ROLLED_BACK) {
+                    revertStockChange(applied);
+                }
+            }
+        });
     }
 
     // Telafi: yapılan stok hareketlerini tersine çevirir. Bu da patlarsa elle düzeltilebilsin diye loglanır, hata yutulur.

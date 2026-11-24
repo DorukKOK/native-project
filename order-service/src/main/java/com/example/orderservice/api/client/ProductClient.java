@@ -12,6 +12,7 @@ import java.util.NoSuchElementException;
 // product-service ile konuşan tek yer. OrderService HTTP detayını bilmez, sadece bu sınıfı çağırır.
 @Component //Bu sınıfın kendisinden bir nesne üret ve sakla.
 public class ProductClient {
+
     private final RestClient restClient;
 
     // Aynı tipte tek bean olduğu için Spring RestClientConfig.productRestClient'ı kendisi enjekte eder
