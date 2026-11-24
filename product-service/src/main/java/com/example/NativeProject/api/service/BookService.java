@@ -77,13 +77,13 @@ public class BookService {
     }
 
     // AuthorService yazar adı değişince çağırır: cache'teki kitaplarda eski authorName kalmasın
-    public void clearCache() {
+    public void clearAllCache() {
         bookCache.clear();
         pageCache.clear();
     }
 
     // StockService stok değiştirince çağırır: o kitap ve sayfalar eski stokla kalmasın
-    public void clearCache(Long bookId) {
+    public void evictBook(Long bookId) {
         bookCache.remove(bookId);
         pageCache.clear();
     }

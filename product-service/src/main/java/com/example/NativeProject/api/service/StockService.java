@@ -8,23 +8,23 @@ import com.example.NativeProject.api.response.StockResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.NoSuchElementException;
 
 // Stok artık books tablosunda (stock_quantity). Değişiklikler BookRepository'deki atomik UPDATE'lerle yapılır.
+// Stok için ayrı bir cache tutulmuyor: stok zaten BookService'in kitap cache'indeki BookResponse.quantity alanında.
+// Ayrı bir stockCache olsaydı kitap silinince/güncellenince onu da temizlemek gerekirdi; BookService -> StockService
+// bağımlılığı da döngüsel bağımlılık (StockService zaten BookService'e bağlı) yaratırdı.
 @Service
 @RequiredArgsConstructor
 public class StockService {
     private final BookRepository bookRepository;
     private final BookService bookService;
 
+    // Okuma cache'ten: BookService.getBookById (CACHE HIT/MISS orada loglanır, kitap yoksa 404)
     @Transactional(readOnly = true)
     public StockResponse getStockByBookId(Long bookId) {
-        Integer quantity = bookRepository.findStockQuantityById(bookId)
-                .orElseThrow(() -> bookNotFound(bookId));
-        return toResponse(bookId, quantity);
+        return toResponse(bookId, bookService.getBookById(bookId).getQuantity());
     }
 
     @Transactional
@@ -32,8 +32,9 @@ public class StockService {
         if (bookRepository.setStock(bookId, request.getQuantity()) == 0) {
             throw bookNotFound(bookId);
         }
-        clearBookCacheAfterCommit(bookId);
-        return getStockByBookId(bookId);
+        // Normal kullanım: transaction İÇİNDE, commit'ten ÖNCE temizler
+        bookService.evictBook(bookId);
+        return readStockFromDb(bookId);
     }
 
     @Transactional
@@ -41,8 +42,9 @@ public class StockService {
         if (bookRepository.increaseStock(bookId, request.getAmount()) == 0) {
             throw bookNotFound(bookId);
         }
-        clearBookCacheAfterCommit(bookId);
-        return getStockByBookId(bookId);
+        // Normal kullanım: transaction İÇİNDE, commit'ten ÖNCE temizler
+        bookService.evictBook(bookId);
+        return readStockFromDb(bookId);
     }
 
     @Transactional
@@ -54,19 +56,17 @@ public class StockService {
             }
             throw new InsufficientStockException(bookId);
         }
-        clearBookCacheAfterCommit(bookId);
-        return getStockByBookId(bookId);
+        // Normal kullanım: transaction İÇİNDE, commit'ten ÖNCE temizler
+        bookService.evictBook(bookId);
+        return readStockFromDb(bookId);
     }
 
-    // Cache'i işlem commit olduktan sonra temizliyoruz: önce temizlersek, o arada gelen bir okuma
-    // henüz commit olmamış eski stoğu cache'e geri yazabilir.
-    private void clearBookCacheAfterCommit(Long bookId) {
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                bookService.clearCache(bookId);
-            }
-        });
+    // Yazma sonrası cevap DB'den okunur, cache'ten DEĞİL: getBookById burada çağrılsaydı henüz commit olmamış
+    // yeni stoğu cache'e koyardı; transaction rollback olursa cache'te hiç gerçekleşmemiş bir stok kalırdı.
+    private StockResponse readStockFromDb(Long bookId) {
+        Integer quantity = bookRepository.findStockQuantityById(bookId)
+                .orElseThrow(() -> bookNotFound(bookId));
+        return toResponse(bookId, quantity);
     }
 
     private NoSuchElementException bookNotFound(Long bookId) {
